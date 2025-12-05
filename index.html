@@ -2394,22 +2394,23 @@
     // FUNGSI BANTUAN UNTUK AUTO-IMPORT EXCEL
     // =========================
 
-    // Cek apakah suatu tahun sudah punya data (ada angka selain 0)
-    function yearHasAnyData(year) {
-      const yearData = dataStore[year];
-      if (!yearData) return false;
-      for (const svcKey of Object.keys(yearData)) {
-        const svcData = yearData[svcKey];
-        if (!svcData) continue;
-        const tArr = Array.isArray(svcData.target_bulan) ? svcData.target_bulan : [];
-        const cArr = Array.isArray(svcData.capaian_bulan) ? svcData.capaian_bulan : [];
-        const hasNonZero =
-          tArr.some(v => Number(v || 0) !== 0) ||
-          cArr.some(v => Number(v || 0) !== 0);
-        if (hasNonZero) return true;
-      }
-      return false;
-    }
+   // Cek apakah suatu tahun sudah punya data (ada angka selain 0)
+function yearHasAnyData(year) {
+  const yearData = dataStore[year];
+  if (!yearData) return false;
+  for (const svcKey of Object.keys(yearData)) {
+    const svcData = yearData[svcKey];
+    if (!svcData) continue;
+    const tArr = Array.isArray(svcData.target_bulan) ? svcData.target_bulan : [];
+    const cArr = Array.isArray(svcData.capaian_bulan) ? svcData.capaian_bulan : [];
+    const hasNonZero =
+      tArr.some(v => Number(v || 0) !== 0) ||
+      cArr.some(v => Number(v || 0) !== 0);
+    if (hasNonZero) return true;
+  }
+  return false;
+}
+
 
     // Import satu workbook Excel ke dataStore untuk 1 tahun tertentu
     // Mengharapkan struktur:
@@ -2454,44 +2455,45 @@
     }
 
     // Auto-import file-file Excel default dengan pola nama:
-    //   data-penerimaan-YYYY.xlsx
-    // untuk rentang tahun [currentYear - AUTO_IMPORT_MIN_OFFSET, currentYear + AUTO_IMPORT_MAX_OFFSET]
-    async function autoImportDefaultExcels() {
-      const currentYear = new Date().getFullYear();
-      const startYear   = currentYear - AUTO_IMPORT_MIN_OFFSET;
-      const endYear     = currentYear + AUTO_IMPORT_MAX_OFFSET;
+//   data-penerimaan-YYYY.xlsx
+// untuk rentang tahun [currentYear - AUTO_IMPORT_MIN_OFFSET, currentYear + AUTO_IMPORT_MAX_OFFSET]
+// Sekarang: SELALU mencoba meng-import, sehingga file Excel terbaru
+// menjadi sumber kebenaran utama untuk tahun tersebut.
+async function autoImportDefaultExcels() {
+  const currentYear = new Date().getFullYear();
+  const startYear   = currentYear - AUTO_IMPORT_MIN_OFFSET;
+  const endYear     = currentYear + AUTO_IMPORT_MAX_OFFSET;
 
-      for (let year = startYear; year <= endYear; year++) {
-        // Lewati jika tahun sudah punya data signifikan (dari localStorage / input manual / import sebelumnya)
-        if (yearHasAnyData(year)) continue;
+  for (let year = startYear; year <= endYear; year++) {
+    const fileName = `data-penerimaan-${year}.xlsx`;
 
-        const fileName = `data-penerimaan-${year}.xlsx`;
-        try {
-          const resp = await fetch(fileName);
-          if (!resp.ok) {
-            console.warn("File Excel default tidak ditemukan:", fileName);
-            continue;
-          }
-
-          const arrayBuffer = await resp.arrayBuffer();
-          const workbook = new ExcelJS.Workbook();
-          await workbook.xlsx.load(arrayBuffer);
-
-          const handled = importWorkbookToStore(workbook, year);
-          if (handled) {
-            console.log("Auto-import berhasil dari", fileName, "untuk tahun", year);
-          }
-        } catch (err) {
-          console.warn("Gagal auto-import", fileName, err);
-        }
+    try {
+      const resp = await fetch(fileName);
+      if (!resp.ok) {
+        // Kalau file tidak ada, lanjut ke tahun berikutnya
+        console.warn("File Excel default tidak ditemukan:", fileName);
+        continue;
       }
 
-      // Setelah auto-import selesai, simpan & refresh tampilan
-      saveData();
-      ensureYear(getSelectedYear());
-      buildTable();
-      rebuildCharts();
+      const arrayBuffer = await resp.arrayBuffer();
+      const workbook = new ExcelJS.Workbook();
+      await workbook.xlsx.load(arrayBuffer);
+
+      const handled = importWorkbookToStore(workbook, year);
+      if (handled) {
+        console.log("Auto-import berhasil dari", fileName, "untuk tahun", year);
+      }
+    } catch (err) {
+      console.warn("Gagal auto-import", fileName, err);
     }
+  }
+
+  // Setelah auto-import selesai, simpan & refresh tampilan
+  saveData();
+  ensureYear(getSelectedYear());
+  buildTable();
+  rebuildCharts();
+}
 
     // =========================
     // IMPORT / EXPORT EXCEL
