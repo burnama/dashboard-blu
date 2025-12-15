@@ -532,6 +532,9 @@
           <button class="btn btn-primary" id="btnImportExcel">
             <span class="btn-icon">📥</span> Import Excel
           </button>
+          <button class="btn" id="btnLoadFromServer">
+            <span class="btn-icon">🌐</span> Muat dari Server
+          </button>
           <button class="btn" id="btnSave">
             <span class="btn-icon">💾</span> Simpan ke Browser
           </button>
@@ -541,7 +544,7 @@
         </div>
         <input type="file" id="excelInput" accept=".xlsx,.xls" style="display:none;" />
         <div class="helper-text" id="dataInfo">
-          Belum ada data yang dimuat. Silakan klik <b>Import Excel</b> dan pilih file <code>data-ikm-nps-YYYY.xlsx</code>.
+          Belum ada data yang dimuat. Klik <b>Muat dari Server</b> (jika file Excel sudah ada di folder website) atau klik <b>Import Excel</b> untuk memilih file <code>data-ikm-nps-YYYY.xlsx</code> dari komputer.
         </div>
       </section>
 
@@ -670,12 +673,27 @@ Tekan tombol <b>Generate Laporan</b> untuk membuat ringkasan otomatis berdasarka
 
     const STORAGE_KEY = "ikm_nps_dashboard_data_v3";
 
+// ===== AUTO-LOAD dari Server (untuk hosting non-lokal) =====
+// Letakkan file Excel di folder yang sama dengan HTML ini (repo GitHub Pages),
+// misalnya: data-ikm-nps-2025.xlsx, data-ikm-nps-2024.xlsx, dst.
+// Sistem akan mencoba memuat otomatis saat halaman dibuka.
+const SERVER_FILE_CANDIDATES = [
+  "data-ikm-nps.xlsx",
+  "data-ikm-nps-2025.xlsx",
+  "data-ikm-nps-2024.xlsx",
+  "data-ikm-nps-2023.xlsx",
+  "data-ikm-nps-2026.xlsx",
+  "data-ikm-nps-2027.xlsx"
+];
+const SERVER_META_KEY = "ikm_nps_last_server_load_v1";
+
     const yearSelect       = document.getElementById("yearSelect");
     const quarterSelect    = document.getElementById("quarterSelect");
     const btnImportExcel   = document.getElementById("btnImportExcel");
     const excelInput       = document.getElementById("excelInput");
     const btnSave          = document.getElementById("btnSave");
     const btnResetYear     = document.getElementById("btnResetYear");
+    const btnLoadFromServer = document.getElementById("btnLoadFromServer");
     const dataInfoEl       = document.getElementById("dataInfo");
 
     const summaryPeriodLabel = document.getElementById("summaryPeriodLabel");
@@ -1087,87 +1105,130 @@ Tekan tombol <b>Generate Laporan</b> untuk membuat ringkasan otomatis berdasarka
     // =========================
     // IMPORT EXCEL
     // =========================
+// =========================
+// PARSE WORKBOOK (IKM & NPS)
+// =========================
+function parseWorkbookIntoStore(workbook, year) {
+  ensureYear(year);
+
+  const sheetIKM = workbook.getWorksheet("ikm");
+  const sheetNPS = workbook.getWorksheet("nps");
+
+  if (!sheetIKM && !sheetNPS) {
+    throw new Error("Sheet 'ikm' atau 'nps' tidak ditemukan.");
+  }
+
+  // IKM: triwulan | IKM | unsur_ikm_tertinggi | unsur_ikm_terendah | unsur_tertinggi | unsur_terendah
+  if (sheetIKM) {
+    for (let i = 0; i < 4; i++) {
+      const rowIdx = 2 + i;
+      const row = sheetIKM.getRow(rowIdx);
+
+      const ikmValRaw   = row.getCell(2).value;
+      const highestRaw  = row.getCell(3).value;
+      const lowestRaw   = row.getCell(4).value;
+      const highestName = row.getCell(5).value;
+      const lowestName  = row.getCell(6).value;
+
+      const ikmVal      = parseLocaleNumber(ikmValRaw, false);
+      const highestVal  = parseLocaleNumber(highestRaw, false);
+      const lowestVal   = parseLocaleNumber(lowestRaw, false);
+
+      if (ikmVal !== null) dataStore[year].ikm[i] = ikmVal;
+
+      dataStore[year].ikmDetail[i] = {
+        highestValue: highestVal,
+        lowestValue: lowestVal,
+        highestName: highestName || null,
+        lowestName: lowestName || null
+      };
+    }
+  }
+
+  // NPS: triwulan | NPS (misal 82,13% atau 0.8213 jika format persen Excel)
+  if (sheetNPS) {
+    for (let i = 0; i < 4; i++) {
+      const rowIdx = 2 + i;
+      const row = sheetNPS.getRow(rowIdx);
+      const npsRaw = row.getCell(2).value;
+      const npsVal = parseLocaleNumber(npsRaw, true); // percent 0–100
+      if (npsVal !== null) dataStore[year].nps[i] = npsVal;
+    }
+  }
+
+  // Pastikan tahun ada di dropdown
+  if (![...yearSelect.options].some(opt => parseInt(opt.value, 10) === year)) {
+    const opt = document.createElement("option");
+    opt.value = year;
+    opt.textContent = year;
+    yearSelect.appendChild(opt);
+  }
+  yearSelect.value = year;
+
+  // Simpan agar tidak perlu upload ulang di domain yang sama
+  saveData();
+
+  refreshAllUI();
+}
+
+async function fetchExcelFromUrl(url) {
+  const res = await fetch(url, { cache: "no-store" });
+  if (!res.ok) throw new Error("HTTP " + res.status);
+  const buf = await res.arrayBuffer();
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(buf);
+  return wb;
+}
+
+function detectYearFromFilename(filename) {
+  const match = String(filename || "").match(/(\d{4})/);
+  if (match) return parseInt(match[1], 10);
+  return new Date().getFullYear();
+}
+
+async function autoLoadFromServer() {
+  for (const file of SERVER_FILE_CANDIDATES) {
+    try {
+      const wb = await fetchExcelFromUrl(file);
+      const year = detectYearFromFilename(file);
+      parseWorkbookIntoStore(wb, year);
+
+      localStorage.setItem(SERVER_META_KEY, JSON.stringify({
+        file,
+        year,
+        loaded_at: new Date().toISOString()
+      }));
+
+      dataInfoEl.innerHTML =
+        `✔ Data dimuat otomatis dari server: <b>${file}</b> (Tahun <b>${year}</b>).`;
+      return true;
+    } catch (e) {
+      // coba file berikutnya
+    }
+  }
+  return false;
+}
+
 
     async function importExcelFile(file) {
-      try {
-        const workbook = new ExcelJS.Workbook();
-        const buffer = await file.arrayBuffer();
-        await workbook.xlsx.load(buffer);
+  try {
+    const workbook = new ExcelJS.Workbook();
+    const buffer = await file.arrayBuffer();
+    await workbook.xlsx.load(buffer);
 
-        // Deteksi tahun dari nama file: data-ikm-nps-YYYY.xlsx
-        const name = file.name || "";
-        const matchYear = name.match(/(\d{4})/);
-        let year = matchYear ? parseInt(matchYear[1], 10) : new Date().getFullYear();
+    // Deteksi tahun dari nama file: data-ikm-nps-YYYY.xlsx
+    const year = detectYearFromFilename(file.name);
+    parseWorkbookIntoStore(workbook, year);
 
-        ensureYear(year);
+    showToast(`✔ Data IKM & NPS Tahun ${year} berhasil di-import.`);
+  } catch (err) {
+    console.error(err);
+    showToast("❌ Gagal membaca file Excel. Pastikan formatnya sesuai.");
+  }
+}
 
-        const sheetIKM = workbook.getWorksheet("ikm");
-        const sheetNPS = workbook.getWorksheet("nps");
-
-        if (!sheetIKM && !sheetNPS) {
-          showToast("⚠ Sheet 'ikm' atau 'nps' tidak ditemukan.");
-          return;
-        }
-
-        // IKM: triwulan | IKM | unsur_ikm_tertinggi | unsur_ikm_terendah | unsur_tertinggi | unsur_terendah
-        if (sheetIKM) {
-          for (let i = 0; i < 4; i++) {
-            const rowIdx = 2 + i;
-            const row = sheetIKM.getRow(rowIdx);
-            const ikmValRaw   = row.getCell(2).value;
-            const highestRaw  = row.getCell(3).value;
-            const lowestRaw   = row.getCell(4).value;
-            const highestName = row.getCell(5).value;
-            const lowestName  = row.getCell(6).value;
-
-            const ikmVal      = parseLocaleNumber(ikmValRaw, false);
-            const highestVal  = parseLocaleNumber(highestRaw, false);
-            const lowestVal   = parseLocaleNumber(lowestRaw, false);
-
-            if (ikmVal !== null) {
-              dataStore[year].ikm[i] = ikmVal;
-            }
-            dataStore[year].ikmDetail[i] = {
-              highestValue: highestVal,
-              lowestValue: lowestVal,
-              highestName: highestName || null,
-              lowestName: lowestName || null
-            };
-          }
-        }
-
-        // NPS: triwulan | NPS (misal 82,09%)
-        if (sheetNPS) {
-          for (let i = 0; i < 4; i++) {
-            const rowIdx = 2 + i;
-            const row = sheetNPS.getRow(rowIdx);
-            const npsRaw = row.getCell(2).value;
-            const npsVal = parseLocaleNumber(npsRaw, true); // percent 0–100
-            if (npsVal !== null) {
-              dataStore[year].nps[i] = npsVal;
-            }
-          }
-        }
-
-        // Tambahkan tahun ke dropdown bila belum ada
-        if (![...yearSelect.options].some(opt => parseInt(opt.value, 10) === year)) {
-          const opt = document.createElement("option");
-          opt.value = year;
-          opt.textContent = year;
-          yearSelect.appendChild(opt);
-        }
-        yearSelect.value = year;
-
-        refreshAllUI();
-        showToast(`✔ Data IKM & NPS Tahun ${year} berhasil di-import.`);
-      } catch (err) {
-        console.error(err);
-        showToast("❌ Gagal membaca file Excel. Pastikan formatnya sesuai.");
-      }
-    }
-
-    // =========================
-    // LAPORAN OTOMATIS (IKM & NPS)
+// =========================
+// LAPORAN OTOMATIS (IKM & NPS)
     // =========================
 
     function generateReport() {
@@ -1277,6 +1338,20 @@ Tekan tombol <b>Generate Laporan</b> untuk membuat ringkasan otomatis berdasarka
       ensureYear(getSelectedYear());
       refreshAllUI();
 
+// Jika halaman sudah di-host (GitHub Pages/hosting lain), data lokal dari file:// tidak terbawa.
+// Solusi: muat otomatis dari file Excel yang ikut di-upload ke server (jika tersedia).
+const yearsExisting = listYearsInStore();
+if (yearsExisting.length === 0) {
+  autoLoadFromServer().then((ok) => {
+    if (!ok) {
+      dataInfoEl.innerHTML =
+        'Belum ada data yang dimuat. ' +
+        'Klik <b>Muat dari Server</b> jika file Excel sudah ada di folder website, ' +
+        'atau klik <b>Import Excel</b> untuk upload manual.';
+    }
+  });
+}
+
       yearSelect.addEventListener("change", () => {
         ensureYear(getSelectedYear());
         refreshAllUI();
@@ -1289,6 +1364,15 @@ Tekan tombol <b>Generate Laporan</b> untuk membuat ringkasan otomatis berdasarka
       btnImportExcel.addEventListener("click", () => {
         excelInput.click();
       });
+
+btnLoadFromServer.addEventListener("click", async () => {
+  const ok = await autoLoadFromServer();
+  if (!ok) {
+    showToast("⚠ Tidak menemukan file Excel di server. Pastikan file sudah di-upload ke folder yang sama.");
+  } else {
+    showToast("✔ Data berhasil dimuat dari server.");
+  }
+});
 
       excelInput.addEventListener("change", (e) => {
         const file = e.target.files[0];
