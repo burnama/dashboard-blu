@@ -720,6 +720,36 @@
     .heatmap-cell.value.high {
       background: rgba(56, 142, 60, 0.7);
     }
+    /* ==== Susunan card dibuat kolom === */
+.layout-main {
+  display: flex;
+  flex-direction: column;
+  gap: 32px; /* beri jarak */
+}
+
+/* Jika ingin mobile tetap bagus (opsional) */
+@media (min-width: 1024px) {
+  .layout-main > .card:first-child {
+    order: 1; /* Input Target tetap paling atas */
+  }
+  .layout-main > .card:nth-child(2) {
+    order: 2; /* Ringkasan pindah ke bawah */
+  }
+}
+/* ==== SUSUNAN VERTIKAL UNTUK BOTTOM GRID ==== */
+.bottom-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 32px; /* jarak antar card */
+}
+
+/* pastikan urutan */
+.bottom-grid > .card:first-child {
+  order: 1; /* Heatmap & Kontribusi */
+}
+.bottom-grid > .card:nth-child(2) {
+  order: 2; /* Review & Laporan Otomatis */
+}
   </style>
 </head>
 <body>
