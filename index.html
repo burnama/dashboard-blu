@@ -750,6 +750,27 @@
 .bottom-grid > .card:nth-child(2) {
   order: 2; /* Review & Laporan Otomatis */
 }
+    /* ==== FULL WIDTH MODE ==== */
+.app-shell {
+  max-width: 100% !important;   /* hilangkan batas */
+  width: 100%;
+  margin: 0;                    /* rata kiri-kanan */
+  padding-left: 20px;
+  padding-right: 20px;          /* biar tidak mentok ke tepian layar */
+}
+
+/* header ikut full */
+header.app-header {
+  border-radius: 0 !important;  /* header melebar penuh */
+  margin-left: -20px;
+  margin-right: -20px;
+}
+
+/* card selalu ikut penuh mengikuti grid/kolom */
+.card {
+  width: 100%;
+}
+
   </style>
 </head>
 <body>
